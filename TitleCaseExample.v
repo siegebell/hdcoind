@@ -132,32 +132,42 @@ Section Verification.
   Import HoareDoublesI.
   Require Import CoInduction.
 
+  Definition tc_ret s := if is_title_case s then 1 else 0.
 
   Lemma parseLetters_ind_ok: forall (I: predicate heap -> stmt -> Prop) a s F k,
-    I ||= {{a |->0 s && F}}  k (if is_title_case_ true s then 1 else 0) ->
+    I ||= {{a |->0 s && F}}  k (tc_ret ("A"++s)%string) ->
     (forall a s0 s' F,
       append s0 s' = s ->
-      I ||= {{a |->0 s' && F}}  k (if is_title_case_ false s' then 1 else 0) ->
+      I ||= {{a |->0 s' && F}}  k (tc_ret s') ->
       I ||- {{a |->0 s' && F}} (parseWS a >>= k)) ->
     I ||- {{a |->0 s && F}}  parseLetters a >>= k.
   Proof.
     intros I a s F k.
     intros Hsafe_k Hsafe_sws.
+    unfold tc_ret in Hsafe_k; simpl in Hsafe_k.
+    rewrite <-is_title_case_in_word in Hsafe_k.
     revert a F Hsafe_k.
     induction s; simpl; intros.
     * rewrite unfold_parseLetters.
     step.
     mcase_eq.
     step; auto.
-    * rewrite unfold_parseLetters.
+    *
+    (* x <- parseLetters a; k x *)
+    rewrite unfold_parseLetters.
+    (* x <- act (read a); *)
     step.
+    (* (if x =? Z_of_ascii zero *)
     mcase_eq.
+    (*  then ret 1 *)
     { apply Z_of_ascii_inv in H; subst a.
       step; auto.
     }
+    (*  else if x =? Z_of_ascii " " *)
     destruct (ascii_dec a zero); subst.
     congruence.
     destruct (ascii_dec a " "); subst.
+    (*   then parseWS (1 + a) *)
     { rewrite Z.eqb_refl.
       rewrite str0_cons, (inter_comm ((1+a0) |->0 _)), <-!inter_assoc in Hsafe_k |- *.
       apply hd'_safe.
@@ -170,6 +180,7 @@ Section Verification.
     rewrite Bool.negb_orb, Bool.orb_andb_distrib_l, negb_orb_cancel_l in Hsafe_k |- *.
     rewrite Bool.andb_true_r in Hsafe_k |- *.
     mcase_eq.
+    (*     then parseLetters (1 + a) *)
     { rewrite str0_cons, (inter_comm ((1+a0) |->0 _)), <-!inter_assoc in Hsafe_k |- *.
       apply hd'_safe.
       apply IHs; intros; auto.
@@ -182,10 +193,11 @@ Section Verification.
   Qed.
 
   Lemma parseWS_ind_ok: forall I a s F k,
-    I ||= {{a |->0 s && F}}  k (if is_title_case_ false s then 1 else 0) ->
+    I ||= {{a |->0 s && F}}  k (tc_ret s) ->
     I ||- {{a |->0 s && F}}  parseWS a >>= k.
   Proof.
     intros I a s F k Hsafe_k.
+    unfold tc_ret, is_title_case in Hsafe_k.
     revert Hsafe_k.
     remember (append EmptyString s) as s1.
     revert Heqs1.
@@ -197,9 +209,14 @@ Section Verification.
     step.
     mcase_eq.
     step; auto.
-    * rewrite unfold_parseWS.
+    *
+    (* x <- parseWS a; k x *)
+    rewrite unfold_parseWS.
+    (* x <- read a *)
     step.
+    (* if x =? Z_of_ascii zero *)
     mcase_eq.
+    (* then ret 1 *)
     { step; auto.
       repeat mcase_eq in *.
       destruct s0; inversion Heqs1; subst; eauto.
@@ -207,6 +224,7 @@ Section Verification.
       apply Z_of_ascii_inv in H; subst; auto.
       simpl in H0; discriminate.
     }
+    (* else if x =? " " *)
     destruct s.
     compute in H; exfalso; eauto.
     rewrite str0_cons, (inter_comm ((1+a0) |->0 _)), <-!inter_assoc in Hsafe_k |- *.
@@ -216,6 +234,7 @@ Section Verification.
     destruct (ascii_dec a1 zero); subst.
     congruence.
     destruct (ascii_dec a1 " "); subst.
+    (* then parseWS (1+a) *)
     { rewrite Z.eqb_refl.
       apply hd'_safe; eauto.
       destruct s0; inversion Heqs1; subst; eauto.
@@ -224,12 +243,15 @@ Section Verification.
       clear.
       induction s0; simpl in *; congruence.
     }
+    (* else if (negb (is_letterZ x)) || (is_upperZ x) *)
     rewrite (proj2 (Z.eqb_neq _ _)); [ | apply Z_of_ascii_neq; auto ].
     repeat mcase_eq.
+    (* then parseLetters (1+a) *)
     apply hd'_safe, parseLetters_ind_ok; intros; subst; eauto.
     destruct s0; inversion Heqs1; subst; eauto.
     eapply IHs1 with (s1:=(s0++String a1 s2)%string); eauto.
     clear; induction s0; simpl in *; congruence.
+    (* else ret 0 (* not type case *) *)
     step; auto.
   Qed.
 
@@ -237,24 +259,26 @@ Section Verification.
 
 
   Lemma parseLetters_ok: forall (I0 I: predicate heap -> stmt -> Prop) a s F k,
-    I0 ||= {{a |->0 s && F}}  k (if is_title_case_ true s then 1 else 0) ->
+    I0 ||= {{a |->0 s && F}}  k (tc_ret ("A"++s)%string) ->
     incl_inv I0 I ->
     (forall a s F,
-      I0 ||= {{a |->0 s && F}}  k (if is_title_case_ false s then 1 else 0) ->
+      I0 ||= {{a |->0 s && F}}  k (tc_ret s) ->
       I ||= {{a |->0 s && F}} parseWS a >>= k) ->
     I ||- {{a |->0 s && F}}  parseLetters a >>= k.
   Proof.
     intros I0 I a s F k.
     intros Hsafe_k HI0 Hsafe_sws.
+    unfold tc_ret in Hsafe_k; simpl in Hsafe_k.
+    rewrite <-is_title_case_in_word in Hsafe_k.
     revert a s F Hsafe_k.
     hd_coind.
     (* x <- parseLetters a; k x *)
     rewrite unfold_parseLetters.
     (* x <- act (read a); *)
     step.
-    (* (if x =? Z_of_ascii zero *)
+    (* if x =? Z_of_ascii zero *)
     mcase_eq.
-    (*  then ret 1 *)
+    (*   then ret 1 *)
     { rewrite HI0, H0 in Hsafe_k.
       destruct s; simpl in *.
       step; auto.
@@ -264,7 +288,7 @@ Section Verification.
     }
     destruct s.
     compute in H1; congruence.
-    (*  else if x =? Z_of_ascii " " *)
+    (*   else if x =? Z_of_ascii " " *)
     unfold is_title_case in Hsafe_k.
     simpl in Hsafe_k.
     destruct (ascii_dec a0 zero); subst.
@@ -286,16 +310,17 @@ Section Verification.
     (*     then parseLetters (1 + a) *)
     rewrite str0_cons, (inter_comm ((1+a) |->0 _)), <-!inter_assoc in Hsafe_k |- *.
     eauto.
-    (*     else ret 0 >>= k *)
+    (*   else ret 0 >>= k *)
     rewrite <-H0, <-HI0.
     step; assumption.
   Qed.
 
   Lemma parseWS_ok: forall I a s F k,
-    I ||= {{a |->0 s && F}}  k (if is_title_case_ false s then 1 else 0) ->
+    I ||= {{a |->0 s && F}}  k (tc_ret s) ->
     I ||- {{a |->0 s && F}}  parseWS a >>= k.
   Proof.
     intros I a s F k Hsafe_k.
+    unfold tc_ret, is_title_case in Hsafe_k.
     revert a s F Hsafe_k.
     hd_coind.
     (* x <- parseWS a; k x *)
@@ -304,8 +329,8 @@ Section Verification.
     step.
     (* if x =? Z_of_ascii zero *)
     mcase_eq.
-    { (* then ret 1 *)
-      rewrite H0 in Hsafe_k.
+    (* then ret 1 *)
+    { rewrite H0 in Hsafe_k.
       destruct s; simpl in *.
       step; auto.
       apply Z_of_ascii_inv in H1; subst.
